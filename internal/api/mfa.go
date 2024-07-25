@@ -252,12 +252,16 @@ func (a *API) VerifyFactor(w http.ResponseWriter, r *http.Request) error {
 		Digits:    otp.DigitsSix,
 		Algorithm: otp.AlgorithmSHA1,
 	})
+	if verr != nil {
+		return unprocessableEntityError(ErrorCodeMFAVerificationRejected, "Invalid TOTP code length")
+	}
 
 	if config.Hook.MFAVerificationAttempt.Enabled {
 		input := hooks.MFAVerificationAttemptInput{
-			UserID:   user.ID,
-			FactorID: factor.ID,
-			Valid:    valid,
+			UserID:     user.ID,
+			FactorID:   factor.ID,
+			FactorType: factor.FactorType,
+			Valid:      valid,
 		}
 
 		output := hooks.MFAVerificationAttemptOutput{}
