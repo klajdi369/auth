@@ -252,8 +252,11 @@ func (a *API) VerifyFactor(w http.ResponseWriter, r *http.Request) error {
 		Digits:    otp.DigitsSix,
 		Algorithm: otp.AlgorithmSHA1,
 	})
-	if verr != nil {
+	// See https://github.com/pquerna/otp/blob/3357de7c04813a328d6a1e4a514854213e0f8ce8/totp/totp.go#L98
+	if verr == otp.ErrValidateInputInvalidLength {
 		return unprocessableEntityError(ErrorCodeMFAVerificationRejected, "Invalid TOTP code length")
+	} else if verr != nil {
+		return internalServerError("error validating TOTP code")
 	}
 
 	if config.Hook.MFAVerificationAttempt.Enabled {
