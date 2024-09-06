@@ -55,6 +55,7 @@ var ErrScryptMismatchedHashAndPassword = errors.New("crypto: scrypt hash and pas
 
 // argon2HashRegexp https://github.com/P-H-C/phc-string-format/blob/master/phc-sf-spec.md#argon2-encoding
 var argon2HashRegexp = regexp.MustCompile("^[$](?P<alg>argon2(d|i|id))[$]v=(?P<v>(16|19))[$]m=(?P<m>[0-9]+),t=(?P<t>[0-9]+),p=(?P<p>[0-9]+)(,keyid=(?P<keyid>[^,]+))?(,data=(?P<data>[^$]+))?[$](?P<salt>[^$]+)[$](?P<hash>.+)$")
+var scryptHashRegexp = regexp.MustCompile(`^\$scrypt\$ln=(?P<n>[0-9]+),r=(?P<r>[0-9]+),p=(?P<p>[0-9]+)\$(?P<salt>[^$]+)\$(?P<hash>.+)$`)
 
 type Argon2HashInput struct {
 	alg     string
@@ -80,12 +81,64 @@ type ScryptHashInput struct {
 }
 
 func ParseScryptHash(hash string) (*ScryptHashInput, error) {
-	// TODO: Come up with the appropriate regexp
-	// Do relevant checks
-	// Check N is a power of 2 greater than one
-	// Check r * p < 2**30
+	submatch := scryptHashRegexp.FindStringSubmatchIndex(hash)
 
-	return nil, nil
+	if submatch == nil {
+		return nil, errors.New("crypto: incorrect scrypt hash format")
+	}
+
+	n := string(scryptHashRegexp.ExpandString(nil, "$n", hash, submatch))
+	r := string(scryptHashRegexp.ExpandString(nil, "$r", hash, submatch))
+	p := string(scryptHashRegexp.ExpandString(nil, "$p", hash, submatch))
+	saltB64 := string(scryptHashRegexp.ExpandString(nil, "$salt", hash, submatch))
+	hashB64 := string(scryptHashRegexp.ExpandString(nil, "$hash", hash, submatch))
+
+	nValue, err := strconv.Atoi(n)
+	if err != nil {
+		return nil, fmt.Errorf("crypto: scrypt hash has invalid n parameter %q: %w", n, err)
+	}
+
+	if nValue <= 1 || (nValue&(nValue-1)) != 0 {
+		return nil, fmt.Errorf("crypto: scrypt hash has invalid n parameter %q: must be a power of 2 greater than 1", n)
+	}
+
+	rValue, err := strconv.Atoi(r)
+	if err != nil {
+		return nil, fmt.Errorf("crypto: scrypt hash has invalid r parameter %q: %w", r, err)
+	}
+
+	pValue, err := strconv.Atoi(p)
+	if err != nil {
+		return nil, fmt.Errorf("crypto: scrypt hash has invalid p parameter %q: %w", p, err)
+	}
+
+	if rValue*pValue >= 1<<30 {
+		return nil, fmt.Errorf("crypto: scrypt hash has invalid r and p parameters: r * p must be < 2^30")
+	}
+
+	salt, err := base64.RawStdEncoding.DecodeString(saltB64)
+	if err != nil {
+		return nil, fmt.Errorf("crypto: scrypt hash has invalid base64 in the salt section: %w", err)
+	}
+
+	rawHash, err := base64.RawStdEncoding.DecodeString(hashB64)
+	if err != nil {
+		return nil, fmt.Errorf("crypto: scrypt hash has invalid base64 in the hash section: %w", err)
+	}
+
+	input := &ScryptHashInput{
+		alg: "scrypt",
+		// TODO: Decide if this need to exist and if we should hardcode
+		v:       "1",
+		n:       nValue,
+		r:       rValue,
+		p:       pValue,
+		keyLen:  len(rawHash),
+		salt:    salt,
+		rawHash: rawHash,
+	}
+
+	return input, nil
 }
 
 func ParseArgon2Hash(hash string) (*Argon2HashInput, error) {
@@ -204,9 +257,9 @@ func compareHashAndPasswordScrypt(ctx context.Context, hash, password string) er
 	attributes := []attribute.KeyValue{
 		attribute.String("alg", input.alg),
 		attribute.String("v", input.v),
-		attribute.Int64("n", int64(input.memory)),
-		attribute.Int64("r", int64(input.time)),
-		attribute.Int("p", int(input.threads)),
+		attribute.Int64("n", int64(input.n)),
+		attribute.Int64("r", int64(input.r)),
+		attribute.Int("p", int(input.p)),
 		attribute.Int("len", len(input.rawHash)),
 	}
 	var match bool
@@ -222,7 +275,10 @@ func compareHashAndPasswordScrypt(ctx context.Context, hash, password string) er
 	}()
 	switch input.alg {
 	case "scrypt":
-		derivedKey = scrypt.Key([]byte(password), input.salt, n, r, p, len(input.rawHash))
+		derivedKey, err = scrypt.Key([]byte(password), input.salt, input.n, input.r, input.p, len(input.rawHash))
+		if err != nil {
+			return err
+		}
 	}
 
 	match = subtle.ConstantTimeCompare(derivedKey, input.rawHash) == 0
@@ -240,7 +296,7 @@ func CompareHashAndPassword(ctx context.Context, hash, password string) error {
 	if strings.HasPrefix(hash, Argon2Prefix) {
 		return compareHashAndPasswordArgon2(ctx, hash, password)
 	} else if strings.HasPrefix(hash, ScryptPrefix) {
-		return compreHashAndPasswordScrypt(ctx, hash, password)
+		return compareHashAndPasswordScrypt(ctx, hash, password)
 	}
 
 	// assume bcrypt

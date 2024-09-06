@@ -385,6 +385,10 @@ func (ts *UserTestSuite) TestNewUserWithPasswordHashSuccess() {
 			desc: "Valid argon2id hash",
 			hash: "$argon2id$v=19$m=32,t=3,p=2$SFVpOWJ0eXhjRzVkdGN1RQ$RXnb8rh7LaDcn07xsssqqulZYXOM/EUCEFMVcAcyYVk",
 		},
+		{
+			desc: "Valid scrypt hash",
+			hash: "$scrypt$ln=16384,r=8,p=1$c2FsdHlzYWx0$hash_output_base64",
+		},
 	}
 
 	for _, c := range cases {
@@ -408,6 +412,10 @@ func (ts *UserTestSuite) TestNewUserWithPasswordHashFailure() {
 		{
 			desc: "Invalid bcrypt hash",
 			hash: "plaintest_password",
+		},
+		{
+			desc: "Invalid scrypt hash",
+			hash: "$scrypt$invalid",
 		},
 	}
 
