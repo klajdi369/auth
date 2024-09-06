@@ -16,6 +16,7 @@ import (
 
 	"golang.org/x/crypto/argon2"
 	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/crypto/scrypt"
 )
 
 type HashCost = int
@@ -31,6 +32,7 @@ const (
 	QuickHashCost HashCost = iota
 
 	Argon2Prefix = "$argon2"
+	ScryptPrefix = "$scrypt"
 )
 
 // PasswordHashCost is the current pasword hashing cost
@@ -49,6 +51,7 @@ var (
 )
 
 var ErrArgon2MismatchedHashAndPassword = errors.New("crypto: argon2 hash and password mismatch")
+var ErrScryptMismatchedHashAndPassword = errors.New("crypto: scrypt hash and password mismatch")
 
 // argon2HashRegexp https://github.com/P-H-C/phc-string-format/blob/master/phc-sf-spec.md#argon2-encoding
 var argon2HashRegexp = regexp.MustCompile("^[$](?P<alg>argon2(d|i|id))[$]v=(?P<v>(16|19))[$]m=(?P<m>[0-9]+),t=(?P<t>[0-9]+),p=(?P<p>[0-9]+)(,keyid=(?P<keyid>[^,]+))?(,data=(?P<data>[^$]+))?[$](?P<salt>[^$]+)[$](?P<hash>.+)$")
@@ -63,6 +66,26 @@ type Argon2HashInput struct {
 	data    string
 	salt    []byte
 	rawHash []byte
+}
+
+type ScryptHashInput struct {
+	alg     string
+	v       string
+	n       int
+	r       int
+	p       int
+	keyLen  int
+	salt    []byte
+	rawHash []byte
+}
+
+func ParseScryptHash(hash string) (*ScryptHashInput, error) {
+	// TODO: Come up with the appropriate regexp
+	// Do relevant checks
+	// Check N is a power of 2 greater than one
+	// Check r * p < 2**30
+
+	return nil, nil
 }
 
 func ParseArgon2Hash(hash string) (*Argon2HashInput, error) {
@@ -172,12 +195,52 @@ func compareHashAndPasswordArgon2(ctx context.Context, hash, password string) er
 	return nil
 }
 
+func compareHashAndPasswordScrypt(ctx context.Context, hash, password string) error {
+	input, err := ParseScryptHash(hash)
+	if err != nil {
+		return err
+	}
+	// TODO: Change params
+	attributes := []attribute.KeyValue{
+		attribute.String("alg", input.alg),
+		attribute.String("v", input.v),
+		attribute.Int64("n", int64(input.memory)),
+		attribute.Int64("r", int64(input.time)),
+		attribute.Int("p", int(input.threads)),
+		attribute.Int("len", len(input.rawHash)),
+	}
+	var match bool
+	var derivedKey []byte
+	compareHashAndPasswordSubmittedCounter.Add(ctx, 1, metric.WithAttributes(attributes...))
+	defer func() {
+		attributes = append(attributes, attribute.Bool(
+			"match",
+			match,
+		))
+
+		compareHashAndPasswordCompletedCounter.Add(ctx, 1, metric.WithAttributes(attributes...))
+	}()
+	switch input.alg {
+	case "scrypt":
+		derivedKey = scrypt.Key([]byte(password), input.salt, n, r, p, len(input.rawHash))
+	}
+
+	match = subtle.ConstantTimeCompare(derivedKey, input.rawHash) == 0
+	if !match {
+		return ErrScryptMismatchedHashAndPassword
+	}
+
+	return nil
+}
+
 // CompareHashAndPassword compares the hash and
 // password, returns nil if equal otherwise an error. Context can be used to
 // cancel the hashing if the algorithm supports it.
 func CompareHashAndPassword(ctx context.Context, hash, password string) error {
 	if strings.HasPrefix(hash, Argon2Prefix) {
 		return compareHashAndPasswordArgon2(ctx, hash, password)
+	} else if strings.HasPrefix(hash, ScryptPrefix) {
+		return compreHashAndPasswordScrypt(ctx, hash, password)
 	}
 
 	// assume bcrypt

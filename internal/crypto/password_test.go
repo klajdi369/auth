@@ -19,3 +19,17 @@ func TestArgon2(t *testing.T) {
 		assert.NoError(t, CompareHashAndPassword(context.Background(), example, "test"))
 	}
 }
+
+func TestScrypt(t *testing.T) {
+	// all of these hash the `test` string with various parameters
+
+	// TODO: Trnasform a firebase hash and use that to test
+	// examples := []string{
+	// 	"$scrypt$v=19$m=16,t=2,p=1$bGJRWThNOHJJTVBSdHl2dQ$NfEnUOuUpb7F2fQkgFUG4g",
+	// 	"$scrypt$v=19$m=32,t=3,p=2$SFVpOWJ0eXhjRzVkdGN1RQ$RXnb8rh7LaDcn07xsssqqulZYXOM/EUCEFMVcAcyYVk",
+	// }
+
+	// for _, example := range examples {
+	// 	assert.NoError(t, CompareHashAndPassword(context.Background(), example, "test"))
+	// }
+}
